@@ -3,13 +3,14 @@
 # Copyright Johan Zaxmy johan@zaxmy.com 
 # License GPLv3
 
+from termios import TIOCLINUX
 import time
 import curses
 import random
 from curses import wrapper
 
 def getbyte(number, i):
-    return (number & (0xff << (i * 8))) >> (i * 8)
+   return (number & (0xff << (i * 8))) >> (i * 8)
 
 class Tile:
    RIGHT = (1,0)
@@ -40,12 +41,9 @@ class Wurm():
    NOTHING = 'N'
 
    def __init__(self) -> None:
-      self.head = Tile(10,5,Tile.RIGHT)
+      self.head = Tile(7,5,Tile.RIGHT)
       self.head.b = "<"
       self.body = []
-      self.body.append(Tile(9,5,Tile.RIGHT))
-      self.body.append(Tile(8,5,Tile.RIGHT))
-      self.body.append(Tile(7,5,Tile.RIGHT))
       self.body.append(Tile(6,5,Tile.RIGHT))
       self.body.append(Tile(5,5,Tile.RIGHT))
       self.body.append(Tile(4,5,Tile.RIGHT))
@@ -102,8 +100,8 @@ class Wurm():
       if self.oldtail_x != None:
          surface.addstr(self.oldtail_y,self.oldtail_x," ")
       self.tail.draw(surface)
-      # Current body length is the score
-      msg = "[Score: %d]" % (10*len(self.body))
+      # Current body length is the score, starts with 3
+      msg = "[Score: %d]" % (10*(len(self.body)-3))
       surface.addstr(curses.LINES-1,curses.COLS//2-len(msg)//2,msg,curses.color_pair(3))
 
       return state
@@ -120,32 +118,68 @@ class Wurm():
       elif direction == Tile.LEFT:
          self.head.b=">"
       
-# 
+#
+
+def collision(char):
+   return char in Tile.BAD_OBJECTS or char in Tile.GOOD_OBJECTS.keys() 
+
+def get_char(x,y,surface):
+   char = surface.inch(y,x)
+   return chr(getbyte(char,0))
+ 
+def draw_fruit(x,y,surface):
+   fruit = random.choice([f for f in Tile.GOOD_OBJECTS.keys()])
+   surface.addstr(y,x,fruit,curses.color_pair(3))
+ 
 def add_fruit(surface):
    nx = random.randint(2,curses.COLS-1)
    ny = random.randint(2,curses.LINES-1)
-   coll = surface.inch(ny,nx)
-   coll = getbyte(coll,0)
+   coll = get_char(nx,ny,surface)
+   
    # Did we pick a bad space ?
-   if chr(coll) in Tile.BAD_OBJECTS or chr(coll) in Tile.GOOD_OBJECTS.keys():
-      # Bummer search whole playfield for free spot
+   if collision(coll):
+      # Mitigiation 1:st approach, test 10 more squares
+      for _ in range(0,10):       
+         nx = random.randint(2,curses.COLS-1)
+         ny = random.randint(2,curses.LINES-1)
+         coll = get_char(nx,ny,surface)
+         if not collision(coll):
+            draw_fruit(nx,ny,surface)
+            return True
+ 
+      # Bummer, last resort search whole playfield for free spot
       nx = 1
-      ny = 2
-      while chr(coll) in Tile.BAD_OBJECTS or chr(coll) in Tile.GOOD_OBJECTS.keys():
-         
+      ny = 1
+      while collision(coll):
          nx += 1
          if nx>curses.COLS-2:
             ny += 1
-            nx = 2
+            nx = 1
          # No free space he wins!
          if ny>curses.LINES-2:
             return False
-         coll = surface.inch(ny,nx)
-         coll = getbyte(coll,0)
-   
-   fruit = random.choice([f for f in Tile.GOOD_OBJECTS.keys()])
-   surface.addstr(ny,nx,fruit,curses.color_pair(3))
+         coll = get_char(nx,ny,surface)
+
+   draw_fruit(nx,ny,surface) 
    return True
+
+def pause_game(surface):
+   msg  = "Game is paused"
+   msg2 = "press any key to continue"
+   height =4
+   width = len(msg2)+4
+   tlx = curses.COLS//2-width//2
+   tly = curses.LINES//2-height//2
+   win = curses.newwin(height,width,tly,tlx)
+   win.border('|','|','-','-','+','+','+','+') 
+   win.addstr(1,width//2-len(msg)//2,msg,curses.color_pair(2))
+   win.addstr(2,2,msg2,curses.color_pair(2))
+   win.refresh()
+   # getch is blocking again =)
+   _ = win.getch()
+   del win
+   surface.touchwin()
+   surface.refresh()
 
 def main(stdscr):
    stdscr.clear()
@@ -182,6 +216,9 @@ def main(stdscr):
          wurm.turn(Tile.RIGHT)
       elif c == ord('e'):
          wurm.add += 1
+      elif c == ord('p'):
+         pause_game(stdscr)
+ 
       wurm.move()
       state = wurm.draw(stdscr) 
       if(state == Wurm.DIED):
