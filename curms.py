@@ -3,14 +3,11 @@
 # Copyright Johan Zaxmy johan@zaxmy.com 
 # License GPLv3
 
-from locale import setlocale
-from termios import TIOCLINUX
 import time
 import curses
 import random
 import pickle
 import hashlib
-import locale
 from curses import wrapper
 import curses.textpad as textpad
 
@@ -211,7 +208,7 @@ class HighScore:
       if hash != cmp_hash:
          self.scores={}
       
-      
+    
 
    def save_highscore(self,filename):
       hash = hashlib.sha256(bytes(str(self.scores).encode('utf8'))).hexdigest()
@@ -360,5 +357,5 @@ def main(stdscr):
       stdscr.refresh()
       time.sleep(0.1)
 
-locale.setlocale(locale.LC_ALL, '')
+
 wrapper(main)
