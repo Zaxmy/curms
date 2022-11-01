@@ -8,8 +8,13 @@ from termios import TIOCLINUX
 import time
 import curses
 import random
+import pickle
+import hashlib
 import locale
-from curses import color_pair, wrapper
+from curses import wrapper
+import curses.textpad as textpad
+
+
 
 def getbyte(number, i):
    return (number & (0xff << (i * 8))) >> (i * 8)
@@ -102,7 +107,8 @@ class Wurm():
          surface.addstr(self.oldtail_y,self.oldtail_x," ")
       self.tail.draw(surface)
       # Current body length is the score, starts with 3
-      msg = "[Score: %d]" % (10*(len(self.body)-3))
+      self.score= 10*(len(self.body)-3)
+      msg = "[Score: %d]" % (self.score)
       surface.addstr(curses.LINES-1,curses.COLS//2-len(msg)//2,msg,curses.color_pair(3))
 
       return state
@@ -180,24 +186,118 @@ def pause_game(surface):
    surface.touchwin()
    surface.refresh()
 
-def high_score(surface):
-   msg = "Highscores"
-   height = 14
-   width = len(msg)+8
+class HighScore:
+   def __init__(self,filename):
+      self.scores = []
+      self.load_highscore(filename)
+
+   def load_highscore(self,filename):
+      try:
+         fp = open(filename,'rb')
+      except:
+         return
+      
+      data=fp.read()
+      fp.close()
+      try:
+         scores_hsh=pickle.loads(data)
+      except:
+         print("Bajs")
+         return
+      
+      hash=[k for k in scores_hsh.keys()][0]
+      self.scores = scores_hsh[hash]
+      cmp_hash= hashlib.sha256(bytes(str(self.scores).encode('utf8'))).hexdigest()
+      if hash != cmp_hash:
+         self.scores={}
+      
+      
+
+   def save_highscore(self,filename):
+      hash = hashlib.sha256(bytes(str(self.scores).encode('utf8'))).hexdigest()
+      data = pickle.dumps({hash:self.scores})
+      try:
+         fp = open(filename,'wb') 
+      except:
+         return False
+      fp.write(data)
+      fp.flush()
+      fp.close()
+      return True
+
+   def high_score(self,surface):
+      msg = "Highscores"
+      height = 14
+      width = len(msg)+8
+      tlx = curses.COLS//2-width//2
+      tly = curses.LINES//2-height//2
+      win = curses.newwin(height,width,tly,tlx)
+      win.box() 
+      win.addch(2,0,curses.ACS_LTEE)
+      win.hline(2,1,curses.ACS_HLINE,width-2)
+      win.addch(2,width-1,curses.ACS_RTEE)
+      win.addstr(1,width//2-len(msg)//2,msg,curses.color_pair(3))
+      
+      i=0
+      while i<10 and len(self.scores)!=i:
+         (points,name) = self.scores[i]
+         win.addstr(3+i,1,"%6d %-9s"%(points,name),curses.color_pair(1))
+         i += 1
+      win.refresh()
+      # getch is blocking again =)
+      _ = win.getch()
+      del win
+      surface.touchwin()
+      surface.refresh()
+   
+   def add_entry(self,points,name):
+      self.scores.append((points,name))
+      self.scores.sort(reverse=True)
+      if len(self.scores)>10:
+         _ = self.scores.pop()
+
+   def is_highscore(self,points):
+      if len(self.scores)<10:
+         return True
+      # List can't be empty
+      (min,_) = self.scores[-1]
+      if points>min:
+         return True
+      return False
+
+
+def game_over(surface,highscore,score):
+   go = "-=[ GAME OVER ]=-"
+   msg="New highscore - enter your name"
+   height = 4
+   width = len(msg)+4
    tlx = curses.COLS//2-width//2
    tly = curses.LINES//2-height//2
    win = curses.newwin(height,width,tly,tlx)
    win.box() 
-   win.addch(2,0,curses.ACS_LTEE)
-   win.hline(2,1,curses.ACS_HLINE,width-2)
-   win.addch(2,width-1,curses.ACS_RTEE)
-   win.addstr(1,width//2-len(msg)//2,msg,curses.color_pair(3))
-   win.refresh()
-   # getch is blocking again =)
-   _ = win.getch()
+   win.addstr(1,width//2-len(go)//2,go,curses.color_pair(2))
+   if highscore.is_highscore(score):
+      msg="New highscore - enter your name"
+      win.addstr(2,2,msg,curses.color_pair(2))
+      win.refresh()
+      namebox = curses.newwin(1,8,tly+4,curses.COLS//2-4)
+      name_field=textpad.Textbox(namebox)
+      name_field.stripspaces=True
+      name=name_field.edit()
+      highscore.add_entry(score,name)
+      del name_field
+      del namebox      
+   else:
+      win.refresh()
+      _ = win.getch()
+      
    del win
+   draw_main(surface)
    surface.touchwin()
    surface.refresh()
+   highscore.high_score(surface)
+   
+
 
 def draw_main(stdscr):
    stdscr.clear()
@@ -224,11 +324,13 @@ def main(stdscr):
    wurm.draw(stdscr)
    stdscr.refresh()
    curses.curs_set(0)
-   high_score(stdscr)
+   high = HighScore("snake.dat")
+ 
    while True:
-      
+    
       c=stdscr.getch()
       if c == ord('q'):
+         high.save_highscore("snake.dat")
          break
       elif c == curses.KEY_UP:
          wurm.turn(Tile.UP)
@@ -244,14 +346,11 @@ def main(stdscr):
       wurm.move()
       state = wurm.draw(stdscr) 
       if(state == Wurm.DIED):
-         go = "-=[ GAME OVER ]=-"
-         stdscr.addstr(curses.LINES//2,curses.COLS//2-len(go)//2,go,curses.color_pair(2))
-         stdscr.refresh()
-         time.sleep(5)
+         game_over(stdscr,high,wurm.score)
          draw_main(stdscr)
          del wurm
          wurm = Wurm()
-         pause_game(stdscr)
+ 
       elif (state == Wurm.ATE):
          if not add_fruit(stdscr):
             go = "-=[ YOU BEAT THE GAME ]=-"
