@@ -12,7 +12,6 @@ from curses import wrapper
 import curses.textpad as textpad
 
 
-
 def getbyte(number, i):
    return (number & (0xff << (i * 8))) >> (i * 8)
 
@@ -56,6 +55,10 @@ class Wurm():
       self.tail.b=Tile.TAIL
       self.add = 0
       self.score = 0
+      self.coverage=0
+      self.stats = {}
+      for k in Tile.GOOD_OBJECTS.keys():
+         self.stats[k]=0
       self.oldtail_x=None
       self.oldtail_y=None 
 
@@ -94,6 +97,7 @@ class Wurm():
       # Anything we can eat?
       if coll in Tile.GOOD_OBJECTS.keys():
          self.add += Tile.GOOD_OBJECTS[coll]
+         self.stats[coll] += 1
          state=Wurm.ATE
       # Draw snake
       self.head.draw(surface)
@@ -165,18 +169,26 @@ def add_fruit(surface):
    draw_fruit(nx,ny,surface) 
    return True
 
-def pause_game(surface):
-   msg  = "Game is paused"
-   msg2 = "press any key to continue"
-   height =4
+def pause_game(surface,wurm=None):
+   msg  = "🕹  Game is paused"
+   msg2 = "press [any key] to continue"
+   height =5
    width = len(msg2)+4
    tlx = curses.COLS//2-width//2
    tly = curses.LINES//2-height//2
    win = curses.newwin(height,width,tly,tlx)
    win.box() 
-   win.addstr(1,width//2-len(msg)//2,msg,curses.color_pair(2))
+   win.addstr(1,2,msg,curses.color_pair(2))
    win.addstr(2,2,msg2,curses.color_pair(3))
+   if wurm is not None:
+         s=[]
+         for k in wurm.stats.keys():
+            s.append("%s:%d"%(k,wurm.stats[k]))
+         stats ="stats %s"%(" ".join(s))
+         win.addstr(3,2,stats,curses.color_pair(3))
+
    win.refresh()
+
    # getch is blocking again =)
    _ = win.getch()
    del win
@@ -193,13 +205,11 @@ class HighScore:
          fp = open(filename,'rb')
       except:
          return
-      
       data=fp.read()
       fp.close()
       try:
          scores_hsh=pickle.loads(data)
       except:
-         print("Bajs")
          return
       
       hash=[k for k in scores_hsh.keys()][0]
@@ -207,8 +217,6 @@ class HighScore:
       cmp_hash= hashlib.sha256(bytes(str(self.scores).encode('utf8'))).hexdigest()
       if hash != cmp_hash:
          self.scores={}
-      
-    
 
    def save_highscore(self,filename):
       hash = hashlib.sha256(bytes(str(self.scores).encode('utf8'))).hexdigest()
@@ -223,9 +231,9 @@ class HighScore:
       return True
 
    def high_score(self,surface):
-      msg = "Highscores"
+      msg = " 🏆 Highscores 🏆 "
       height = 14
-      width = len(msg)+8
+      width = len(msg)+5
       tlx = curses.COLS//2-width//2
       tly = curses.LINES//2-height//2
       win = curses.newwin(height,width,tly,tlx)
@@ -234,11 +242,14 @@ class HighScore:
       win.hline(2,1,curses.ACS_HLINE,width-2)
       win.addch(2,width-1,curses.ACS_RTEE)
       win.addstr(1,width//2-len(msg)//2,msg,curses.color_pair(3))
-      
+      medals = ['🥇','🥈','🥉']
       i=0
       while i<10 and len(self.scores)!=i:
          (points,name) = self.scores[i]
-         win.addstr(3+i,1,"%6d %-9s"%(points,name),curses.color_pair(1))
+         m='🎈'
+         if i<3:
+            m=medals[i]
+         win.addstr(3+i,1,"%6d %1s%-8s "%(points,m,name),curses.color_pair(0))
          i += 1
       win.refresh()
       # getch is blocking again =)
@@ -262,9 +273,7 @@ class HighScore:
          return True
       return False
 
-
-def game_over(surface,highscore,score):
-   go = "-=[ GAME OVER ]=-"
+def game_over(surface,highscore,score,go):
    msg="New highscore - enter your name"
    height = 4
    width = len(msg)+4
@@ -274,8 +283,7 @@ def game_over(surface,highscore,score):
    win.box() 
    win.addstr(1,width//2-len(go)//2,go,curses.color_pair(2))
    if highscore.is_highscore(score):
-      msg="New highscore - enter your name"
-      win.addstr(2,2,msg,curses.color_pair(2))
+      win.addstr(2,2,msg,curses.color_pair(3))
       win.refresh()
       namebox = curses.newwin(1,8,tly+4,curses.COLS//2-4)
       name_field=textpad.Textbox(namebox)
@@ -293,8 +301,6 @@ def game_over(surface,highscore,score):
    surface.touchwin()
    surface.refresh()
    highscore.high_score(surface)
-   
-
 
 def draw_main(stdscr):
    stdscr.clear()
@@ -310,6 +316,7 @@ def main(stdscr):
    curses.init_pair(1,curses.COLOR_BLACK,curses.COLOR_GREEN)
    curses.init_pair(2,curses.COLOR_RED,curses.COLOR_BLACK)
    curses.init_pair(3,curses.COLOR_YELLOW,curses.COLOR_BLACK)
+   curses.init_pair(4,curses.COLOR_CYAN ,curses.COLOR_BLACK)
    # Let curses translate key sequences for us
    stdscr.keypad(True)
    # Don't wait for enter on input
@@ -322,7 +329,7 @@ def main(stdscr):
    stdscr.refresh()
    curses.curs_set(0)
    high = HighScore("snake.dat")
- 
+   high.high_score(stdscr)
    while True:
     
       c=stdscr.getch()
@@ -338,24 +345,23 @@ def main(stdscr):
       elif c == curses.KEY_RIGHT:
          wurm.turn(Tile.RIGHT)
       elif c == ord('p'):
-         pause_game(stdscr)
+         pause_game(stdscr,wurm)
       
       wurm.move()
       state = wurm.draw(stdscr) 
       if(state == Wurm.DIED):
-         game_over(stdscr,high,wurm.score)
+         game_over(stdscr,high,wurm.score,"-=[ GAME OVER ]=-")
          draw_main(stdscr)
          del wurm
          wurm = Wurm()
  
       elif (state == Wurm.ATE):
          if not add_fruit(stdscr):
-            go = "-=[ YOU BEAT THE GAME ]=-"
-            stdscr.addstr(curses.LINES//2,curses.COLS//2-len(go)//2,go,curses.color_pair(2))
-            stdscr.refresh()
-            time.sleep(5)
+            game_over(stdscr,high,wurm.score,"-=[ YOU BEAT THE GAME ]=-")
+            draw_main(stdscr)
+            del wurm
+            wurm = Wurm()
       stdscr.refresh()
       time.sleep(0.1)
-
 
 wrapper(main)
