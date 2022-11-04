@@ -285,8 +285,11 @@ def game_over(surface,highscore,score,go):
    if highscore.is_highscore(score):
       win.addstr(2,2,msg,curses.color_pair(3))
       win.refresh()
-      namebox = curses.newwin(1,8,tly+4,curses.COLS//2-4)
-      name_field=textpad.Textbox(namebox)
+      namebox = curses.newwin(3,10,tly+3,curses.COLS//2-5)
+      namebox.box()
+      namebox.refresh()
+      snamebox = namebox.derwin(1,8,1,1)
+      name_field=textpad.Textbox(snamebox)
       name_field.stripspaces=True
       name=name_field.edit()
       highscore.add_entry(score,name)
